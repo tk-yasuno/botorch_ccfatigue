@@ -43,6 +43,7 @@ Examples:
   python main_demo.py
   python main_demo.py --compute-mode cpu_16cores
   python main_demo.py --M 15 --T 30 --seed 12345
+  python main_demo.py --dataset-name complex_alloy --M 10 --T 20
   python main_demo.py --compute-mode gpu_16gb --output results_gpu
         """
     )
@@ -59,6 +60,14 @@ Examples:
         type=str,
         choices=['auto', 'no_parallel', 'cpu_16cores', 'gpu_16gb'],
         help='Compute mode (overrides config.yaml)'
+    )
+    
+    # データセット設定
+    parser.add_argument(
+        '--dataset-name',
+        type=str,
+        choices=['snc', 'tests', 'tension_compression', 'complex_alloy'],
+        help='Dataset name (overrides config.yaml)'
     )
     
     # 最適化パラメータ
@@ -126,34 +135,87 @@ def main():
     
     # config.yamlから最適化パラメータを取得（コマンドライン引数で上書き可能）
     opt_params = compute_config.get_optimization_params()
+    dataset_name = args.dataset_name if args.dataset_name else opt_params.get('dataset_name', 'tension_compression')
+    
+    # データセット別の設定を読み込む
+    import yaml
+    with open(args.config, 'r', encoding='utf-8') as f:
+        full_config = yaml.safe_load(f)
+    
+    # dataset_nameに応じた設定を取得
+    dataset_config = {}
+    if dataset_name == 'complex_alloy' and 'complex_alloy' in full_config:
+        dataset_config = full_config['complex_alloy']
+        print(f"[Config] Using complex_alloy specific configuration")
+    else:
+        dataset_config = full_config.get('optimization', {})
+    
     M = args.M if args.M is not None else opt_params.get('M', 10)
     T = args.T if args.T is not None else opt_params.get('T', 20)
     seed = args.seed if args.seed is not None else opt_params.get('seed', 42)
-    acq_func = args.acq_function if args.acq_function else opt_params.get('acq_function', 'EI')
+    # complex_alloyの場合はLogEIを推奨
+    default_acq = 'LogEI' if dataset_name == 'complex_alloy' else 'EI'
+    acq_func = args.acq_function if args.acq_function else opt_params.get('acq_function', default_acq)
     
     print(f"\nOptimization parameters:")
+    print(f"  Dataset: {dataset_name}")
     print(f"  Initial samples (M): {M}")
     print(f"  BO iterations (T): {T}")
     print(f"  Random seed: {seed}")
     print(f"  Acquisition function: {acq_func}")
     
     # 2. データの読み込み
-    print(f"\n[Step 2/6] Loading CCFatigue data...")
+    print(f"\n[Step 2/6] Loading data (dataset: {dataset_name})...")
+    pca_transformer = None  # PCA変換器を保存（逆変換用）
+    composition_cols_original = None  # 元の組成列名を保存
+    
     try:
         X_df, y_df, feature_names, objective_name = load_ccfatigue_data(
-            dataset_name=opt_params.get('dataset_name', 'tension_compression'),
-            design_variables=opt_params.get('design_variables'),
-            objective_variable=opt_params.get('objective_variable', 'cycles_to_failure'),
-            objective_transform=opt_params.get('objective_transform', 'log10')
+            dataset_name=dataset_name,
+            design_variables=dataset_config.get('design_variables'),
+            objective_variable=dataset_config.get('objective_variable', opt_params.get('objective_variable', 'cycles_to_failure')),
+            objective_transform=dataset_config.get('objective_transform', opt_params.get('objective_transform', 'log10')),
+            filter_conditions=dataset_config.get('filter_conditions') if dataset_name == 'complex_alloy' else None
         )
         
         # データの統計情報
         data_info = describe_data(X_df, y_df)
         print(f"  Total samples: {data_info['n_samples']}")
-        print(f"  Features: {data_info['feature_names']}")
+        print(f"  Features (before PCA): {data_info['feature_names']}")
+        
+        # complex_alloyの場合、PCAを適用
+        if dataset_name == 'complex_alloy' and dataset_config.get('use_pca', False):
+            print(f"\n[Step 2b/6] Applying PCA to composition data...")
+            from src.feature_engineering import CompositionPCA
+            
+            # 組成列と試験条件列を識別
+            composition_cols = dataset_config.get('composition_columns', ['Fe', 'Ni', 'Cr', 'Co', 'Al'])
+            # X_dfに存在する組成列のみを使用
+            composition_cols = [col for col in composition_cols if col in X_df.columns]
+            other_cols = [col for col in X_df.columns if col not in composition_cols]
+            
+            if composition_cols:
+                # PCA変換
+                pca_transformer = CompositionPCA(
+                    variance_threshold=dataset_config.get('pca_variance_threshold', 0.95),
+                    n_components=dataset_config.get('pca_n_components')
+                )
+                X_df = pca_transformer.fit_transform(X_df, composition_cols, other_cols)
+                feature_names = list(X_df.columns)
+                composition_cols_original = composition_cols  # 逆変換用に保存
+                
+                # PCA結果の表示
+                pca_info = pca_transformer.get_explained_variance_info()
+                print(f"  PCA: {len(composition_cols)} → {pca_info['n_components']} components")
+                print(f"  Cumulative variance: {pca_info['cumulative_variance_ratio'][-1]:.2%}")
+                print(f"  Features (after PCA): {feature_names}")
+            else:
+                print(f"  Warning: No composition columns found for PCA")
         
     except Exception as e:
         print(f"Error loading data: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
     
     # 3. 初期データの準備
@@ -249,6 +311,47 @@ def main():
     best_x = results['best_x'].numpy()
     for i, name in enumerate(feature_names):
         print(f"  {name}: {best_x[i]:.4f}")
+    
+    # PCA逆変換：主成分を元の組成に戻す
+    if pca_transformer is not None and composition_cols_original is not None:
+        print(f"\nOptimal Material Composition (PCA inverse transform):")
+        print("="*50)
+        
+        # PC列のインデックスを取得
+        pc_cols = [name for name in feature_names if name.startswith('PC')]
+        pc_indices = [i for i, name in enumerate(feature_names) if name.startswith('PC')]
+        
+        if pc_indices:
+            # PC値を抽出
+            best_pcs = best_x[pc_indices].reshape(1, -1)
+            
+            # 元の組成に逆変換
+            composition_df = pca_transformer.inverse_transform_composition(
+                best_pcs, 
+                normalize=True
+            )
+            
+            # 組成を表示
+            print("\nElement concentrations (wt%):")
+            for col in composition_df.columns:
+                value = composition_df[col].iloc[0]
+                print(f"  {col}: {value:.2f}%")
+            
+            # 組成をJSONファイルに保存
+            import json
+            composition_dict = {
+                'composition_wt_percent': {col: float(composition_df[col].iloc[0]) for col in composition_df.columns},
+                'pca_values': {pc_cols[i]: float(best_x[idx]) for i, idx in enumerate(pc_indices)},
+                'test_conditions': {name: float(best_x[i]) for i, name in enumerate(feature_names) if not name.startswith('PC')}
+            }
+            
+            composition_file = output_path / "optimal_composition.json"
+            with open(composition_file, 'w', encoding='utf-8') as f:
+                json.dump(composition_dict, f, indent=2, ensure_ascii=False)
+            
+            print(f"\n✓ Optimal composition saved to: {composition_file}")
+            print("="*50)
+    
     print(f"\nResults saved to: {args.output}/")
     print("=" * 70 + "\n")
 

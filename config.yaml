@@ -45,9 +45,10 @@ optimization:
   acq_function: EI           # 獲得関数 (Acquisition function: EI or LogEI)
   
   # データセット設定
-  dataset_name: snc          # CCFatigueデータセット名 (snc: S-N curve data)
+  dataset_name: snc          # CCFatigueデータセット名 (snc, tests, complex_alloy)
   
   # 設計変数 (Design variables)
+  # snc/testsの場合
   design_variables:
     - stress_max
     - stress_ratio
@@ -55,6 +56,54 @@ optimization:
   # 目的変数 (Objective variable)
   objective_variable: cycles_to_failure
   objective_transform: log10  # 対数変換 (log10, log, or none)
+
+# =============================================================================
+# Complex Alloy データセット専用設定 (MVP v0.1.2)
+# =============================================================================
+complex_alloy:
+  # 設計変数（組成 + 試験条件）
+  design_variables:
+    # 組成情報（元素濃度, at.%）
+    - Fe
+    - Ni
+    - Cr
+    - Co
+    - Al
+    # 試験条件
+    - stress_max
+    - stress_ratio
+    - frequency
+  
+  # カテゴリ変数（One-hotエンコーディング対象）
+  categorical_variables:
+    - loading_mode        # 荷重モード（tension-compression, bending, torsion）
+  
+  # データフィルタ条件（MVP v0.1.2: 室温・空気中・一定振幅のみ）
+  filter_conditions:
+    temperature: [20, 30]                # 温度範囲 (°C)
+    environment: air                     # 雰囲気
+    loading_mode:                        # 荷重モード（複数指定可能）
+      - uniaxial
+      - tension-compression
+  
+  # PCA設定（組成ベクトルの次元削減）
+  use_pca: true                          # PCAを使用するか
+  pca_variance_threshold: 0.95           # 累積寄与率の閾値
+  pca_n_components: null                 # 主成分数（nullで自動決定）
+  composition_columns:                   # 組成列（PCA適用対象）
+    - Fe
+    - Ni
+    - Cr
+    - Co
+    - Al
+  
+  # 組成カラムの指定（PCA適用対象）
+  composition_columns:
+    - Fe
+    - Ni
+    - Cr
+    - Co
+    - Al
 
 # =============================================================================
 # 可視化設定 (Visualization Settings)
