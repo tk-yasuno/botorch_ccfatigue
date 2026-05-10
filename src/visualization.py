@@ -434,3 +434,289 @@ Best Conditions:
     print(f"[Visualization] Saved summary to {txt_path}")
     
     print(summary_text)
+
+
+# =============================================================================
+# EDA Functions for MVP v0.1.2 — Complex Alloy Dataset
+# =============================================================================
+
+def plot_pca_variance(
+    pca_info: Dict[str, Any],
+    output_path: Optional[str] = None,
+    dpi: int = 300
+) -> plt.Figure:
+    """
+    PCAの累積寄与率をプロット
+    
+    Args:
+        pca_info: PCAの情報辞書（get_explained_variance_info()の出力）
+        output_path: 保存先パス
+        dpi: 解像度
+    
+    Returns:
+        matplotlib Figure
+    """
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    
+    n_components = pca_info["n_components"]
+    var_ratio = pca_info["explained_variance_ratio"]
+    cum_var_ratio = pca_info["cumulative_variance_ratio"]
+    
+    # 個別の説明分散比
+    ax1.bar(range(1, n_components + 1), var_ratio, alpha=0.7, color='#2E86AB')
+    ax1.set_xlabel('Principal Component', fontsize=12)
+    ax1.set_ylabel('Explained Variance Ratio', fontsize=12)
+    ax1.set_title('Individual Explained Variance', fontsize=13, fontweight='bold')
+    ax1.grid(True, alpha=0.3)
+    
+    # 累積説明分散比
+    ax2.plot(range(1, n_components + 1), cum_var_ratio, 'o-', 
+             linewidth=2, markersize=6, color='#F18F01')
+    ax2.axhline(y=0.95, linestyle='--', color='red', alpha=0.7, label='95% threshold')
+    ax2.set_xlabel('Number of Components', fontsize=12)
+    ax2.set_ylabel('Cumulative Explained Variance', fontsize=12)
+    ax2.set_title('Cumulative Explained Variance', fontsize=13, fontweight='bold')
+    ax2.legend(fontsize=10)
+    ax2.grid(True, alpha=0.3)
+    ax2.set_ylim([0, 1.05])
+    
+    plt.tight_layout()
+    
+    if output_path:
+        fig.savefig(output_path, dpi=dpi, bbox_inches='tight')
+        print(f"[Visualization] Saved PCA variance plot to {output_path}")
+    
+    return fig
+
+
+def plot_pca_space(
+    X_pca: pd.DataFrame,
+    y: pd.Series,
+    output_path: Optional[str] = None,
+    dpi: int = 300
+) -> plt.Figure:
+    """
+    PCA空間での分布を可視化（PC1 vs PC2）
+    
+    Args:
+        X_pca: PCA変換後のDataFrame（PC1, PC2, ...を含む）
+        y: 目的変数（疲労寿命のlog10値）
+        output_path: 保存先パス
+        dpi: 解像度
+    
+    Returns:
+        matplotlib Figure
+    """
+    fig, ax = plt.subplots(figsize=(10, 8))
+    
+    # PC1とPC2を使用
+    pc1 = X_pca['PC1']
+    pc2 = X_pca['PC2']
+    
+    # 疲労寿命でカラーマップ
+    scatter = ax.scatter(pc1, pc2, c=y, cmap='viridis', s=50, alpha=0.7, edgecolors='k', linewidth=0.5)
+    
+    ax.set_xlabel('PC1', fontsize=12)
+    ax.set_ylabel('PC2', fontsize=12)
+    ax.set_title('PCA Space (Composition)', fontsize=14, fontweight='bold')
+    ax.grid(True, alpha=0.3)
+    
+    # カラーバー
+    cbar = plt.colorbar(scatter, ax=ax)
+    cbar.set_label('log10(Cycles to Failure)', fontsize=11)
+    
+    plt.tight_layout()
+    
+    if output_path:
+        fig.savefig(output_path, dpi=dpi, bbox_inches='tight')
+        print(f"[Visualization] Saved PCA space plot to {output_path}")
+    
+    return fig
+
+
+def plot_element_loadings(
+    weights: pd.DataFrame,
+    output_path: Optional[str] = None,
+    dpi: int = 300
+) -> plt.Figure:
+    """
+    各主成分における元素の寄与度をプロット
+    
+    Args:
+        weights: 元素 × 主成分の寄与度行列（get_component_weights()の出力）
+        output_path: 保存先パス
+        dpi: 解像度
+    
+    Returns:
+        matplotlib Figure
+    """
+    n_components = min(3, weights.shape[1])  # 最大3成分まで表示
+    
+    fig, axes = plt.subplots(1, n_components, figsize=(6 * n_components, 5))
+    if n_components == 1:
+        axes = [axes]
+    
+    for i, ax in enumerate(axes):
+        pc_name = f'PC{i+1}'
+        if pc_name not in weights.columns:
+            break
+        
+        loadings = weights[pc_name].sort_values(ascending=False)
+        
+        # 棒グラフ
+        colors = ['#2E86AB' if x > 0 else '#A23B72' for x in loadings]
+        ax.barh(range(len(loadings)), loadings, color=colors, alpha=0.7)
+        ax.set_yticks(range(len(loadings)))
+        ax.set_yticklabels(loadings.index, fontsize=10)
+        ax.set_xlabel('Loading', fontsize=11)
+        ax.set_title(f'{pc_name} Loadings', fontsize=12, fontweight='bold')
+        ax.axvline(x=0, color='k', linestyle='-', linewidth=0.8)
+        ax.grid(True, alpha=0.3, axis='x')
+    
+    plt.tight_layout()
+    
+    if output_path:
+        fig.savefig(output_path, dpi=dpi, bbox_inches='tight')
+        print(f"[Visualization] Saved element loadings plot to {output_path}")
+    
+    return fig
+
+
+def plot_correlation_matrix(
+    X_df: pd.DataFrame,
+    output_path: Optional[str] = None,
+    dpi: int = 300
+) -> plt.Figure:
+    """
+    特徴量の相関行列をヒートマップで可視化
+    
+    Args:
+        X_df: 特徴量のDataFrame
+        output_path: 保存先パス
+        dpi: 解像度
+    
+    Returns:
+        matplotlib Figure
+    """
+    corr_matrix = X_df.corr()
+    
+    fig, ax = plt.subplots(figsize=(10, 8))
+    
+    # ヒートマップ
+    sns.heatmap(corr_matrix, annot=True, fmt='.2f', cmap='coolwarm',
+                center=0, square=True, linewidths=1, cbar_kws={"shrink": 0.8},
+                ax=ax)
+    
+    ax.set_title('Feature Correlation Matrix', fontsize=14, fontweight='bold')
+    
+    plt.tight_layout()
+    
+    if output_path:
+        fig.savefig(output_path, dpi=dpi, bbox_inches='tight')
+        print(f"[Visualization] Saved correlation matrix to {output_path}")
+    
+    return fig
+
+
+def plot_feature_distributions(
+    X_df: pd.DataFrame,
+    y_df: pd.Series,
+    output_path: Optional[str] = None,
+    dpi: int = 300
+) -> plt.Figure:
+    """
+    特徴量の分布をヒストグラムで可視化
+    
+    Args:
+        X_df: 特徴量のDataFrame
+        y_df: 目的変数のSeries
+        output_path: 保存先パス
+        dpi: 解像度
+    
+    Returns:
+        matplotlib Figure
+    """
+    n_features = X_df.shape[1]
+    n_cols = min(4, n_features)
+    n_rows = (n_features + n_cols - 1) // n_cols
+    
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows))
+    axes = axes.flatten() if n_features > 1 else [axes]
+    
+    for i, col in enumerate(X_df.columns):
+        ax = axes[i]
+        ax.hist(X_df[col], bins=30, alpha=0.7, color='#2E86AB', edgecolor='k')
+        ax.set_xlabel(col, fontsize=10)
+        ax.set_ylabel('Frequency', fontsize=10)
+        ax.set_title(f'{col} Distribution', fontsize=11, fontweight='bold')
+        ax.grid(True, alpha=0.3, axis='y')
+    
+    # 余分なサブプロットを非表示
+    for j in range(i + 1, len(axes)):
+        axes[j].axis('off')
+    
+    plt.tight_layout()
+    
+    if output_path:
+        fig.savefig(output_path, dpi=dpi, bbox_inches='tight')
+        print(f"[Visualization] Saved feature distributions to {output_path}")
+    
+    return fig
+
+
+def plot_composition_lifetime_scatter(
+    X_df: pd.DataFrame,
+    y_df: pd.Series,
+    composition_columns: List[str],
+    output_path: Optional[str] = None,
+    dpi: int = 300
+) -> plt.Figure:
+    """
+    組成と疲労寿命の散布図（主要元素のみ）
+    
+    Args:
+        X_df: 特徴量のDataFrame
+        y_df: 目的変数（log10(Nf)）
+        composition_columns: 組成カラムのリスト
+        output_path: 保存先パス
+        dpi: 解像度
+    
+    Returns:
+        matplotlib Figure
+    """
+    n_comp = len(composition_columns)
+    n_cols = min(3, n_comp)
+    n_rows = (n_comp + n_cols - 1) // n_cols
+    
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(6 * n_cols, 5 * n_rows))
+    if n_comp == 1:
+        axes = [axes]
+    else:
+        axes = axes.flatten()
+    
+    for i, col in enumerate(composition_columns):
+        ax = axes[i]
+        scatter = ax.scatter(X_df[col], y_df, c=y_df, cmap='viridis', 
+                            s=30, alpha=0.6, edgecolors='k', linewidth=0.3)
+        ax.set_xlabel(f'{col} Content (at.%)', fontsize=11)
+        ax.set_ylabel('log10(Cycles to Failure)', fontsize=11)
+        ax.set_title(f'{col} vs Lifetime', fontsize=12, fontweight='bold')
+        ax.grid(True, alpha=0.3)
+        
+        # カラーバー（最後の1つのみ）
+        if i == len(composition_columns) - 1:
+            cbar = plt.colorbar(scatter, ax=ax)
+            cbar.set_label('log10(Nf)', fontsize=10)
+    
+    # 余分なサブプロットを非表示
+    for j in range(i + 1, len(axes)):
+        axes[j].axis('off')
+    
+    plt.tight_layout()
+    
+    if output_path:
+        fig.savefig(output_path, dpi=dpi, bbox_inches='tight')
+        print(f"[Visualization] Saved composition-lifetime scatter to {output_path}")
+    
+    return fig
+

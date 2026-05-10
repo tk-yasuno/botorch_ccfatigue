@@ -17,22 +17,28 @@ from pathlib import Path
 CCFATIGUE_DATA_DIR = Path(__file__).parent.parent / "data"
 CCFATIGUE_SNC_FILE = CCFATIGUE_DATA_DIR / "ccfatigue_snc.csv"
 CCFATIGUE_TESTS_FILE = CCFATIGUE_DATA_DIR / "ccfatigue_tests.csv"
+# 実データを優先、存在しない場合はモックデータにフォールバック
+COMPLEX_ALLOY_FILE = CCFATIGUE_DATA_DIR / "complex_alloy_fatigue_real.csv"
+if not COMPLEX_ALLOY_FILE.exists():
+    COMPLEX_ALLOY_FILE = CCFATIGUE_DATA_DIR / "complex_alloy_fatigue.csv"
 
 
 def load_ccfatigue_data(
     dataset_name: str = "snc",
     design_variables: Optional[List[str]] = None,
     objective_variable: str = "cycles_to_failure",
-    objective_transform: str = "log10"
+    objective_transform: str = "log10",
+    filter_conditions: Optional[Dict[str, Any]] = None
 ) -> Tuple[pd.DataFrame, pd.DataFrame, List[str], str]:
     """
     CCFatigueデータセットを読み込み、前処理を行う
     
     Args:
-        dataset_name: データセット名（"snc"または"tests"）
+        dataset_name: データセット名（"snc", "tests", "complex_alloy"）
         design_variables: 設計変数のリスト（Noneの場合はデフォルト）
         objective_variable: 目的変数のカラム名
         objective_transform: 目的変数の変換（"log10", "log", "none"）
+        filter_conditions: データフィルタ条件の辞書（例: {"temperature": 293, "environment": "air"}）
     
     Returns:
         X_df: 設計変数のDataFrame
@@ -41,7 +47,12 @@ def load_ccfatigue_data(
         objective_var_name: 目的変数名
     """
     if design_variables is None:
-        design_variables = ["stress_max", "stress_ratio"]
+        # デフォルト設計変数をデータセットごとに設定
+        if dataset_name == "complex_alloy":
+            # 複雑合金データセットのデフォルト
+            design_variables = ["Fe", "Ni", "Cr", "Co", "Al", "stress_max", "stress_ratio", "frequency"]
+        else:
+            design_variables = ["stress_max", "stress_ratio"]
     
     # 実データファイルが存在する場合は読み込む
     if dataset_name == "snc" and CCFATIGUE_SNC_FILE.exists():
@@ -83,6 +94,66 @@ def load_ccfatigue_data(
         y_raw = df_clean[objective_variable].astype(float).reset_index(drop=True)
         
         print(f"[DataLoader] ✓ Using real CCFatigue test data with {len(df_clean)} samples")
+    
+    elif dataset_name == "complex_alloy" and COMPLEX_ALLOY_FILE.exists():
+        print(f"[DataLoader] Loading Complex Alloy fatigue data from: {COMPLEX_ALLOY_FILE}")
+        df = pd.read_csv(COMPLEX_ALLOY_FILE)
+        print(f"[DataLoader] Dataset shape: {df.shape}")
+        print(f"[DataLoader] Available columns: {list(df.columns)}")
+        
+        # フィルタ条件を適用（MVP v0.1.2: 室温・空気中・一定振幅のみ）
+        if filter_conditions is None:
+            filter_conditions = {
+                "temperature": (20, 30),     # 室温範囲 (°C) - 実データに合わせて調整
+                "environment": "air",        # 空気中 (小文字)
+                "loading_mode": ["uniaxial", "tension-compression"]  # 軸荷重
+            }
+        
+        print(f"[DataLoader] Applying filter conditions: {filter_conditions}")
+        df_filtered = df.copy()
+        
+        # 温度フィルタ
+        if "temperature" in filter_conditions:
+            temp_range = filter_conditions["temperature"]
+            if isinstance(temp_range, tuple):
+                df_filtered = df_filtered[
+                    (df_filtered["temperature"] >= temp_range[0]) &
+                    (df_filtered["temperature"] <= temp_range[1])
+                ]
+                print(f"[DataLoader] Filtered by temperature: {len(df_filtered)} samples remaining")
+        
+        # 環境フィルタ (大文字小文字を無視)
+        if "environment" in filter_conditions:
+            env = filter_conditions["environment"]
+            df_filtered = df_filtered[df_filtered["environment"].str.lower() == env.lower()]
+            print(f"[DataLoader] Filtered by environment={env}: {len(df_filtered)} samples remaining")
+        
+        # 荷重モードフィルタ (複数モードに対応)
+        if "loading_mode" in filter_conditions:
+            mode = filter_conditions["loading_mode"]
+            if isinstance(mode, list):
+                df_filtered = df_filtered[df_filtered["loading_mode"].isin(mode)]
+                print(f"[DataLoader] Filtered by loading_mode in {mode}: {len(df_filtered)} samples remaining")
+            else:
+                df_filtered = df_filtered[df_filtered["loading_mode"] == mode]
+                print(f"[DataLoader] Filtered by loading_mode={mode}: {len(df_filtered)} samples remaining")
+        
+        # 必要なカラムの存在確認
+        missing_cols = set(design_variables + [objective_variable]) - set(df_filtered.columns)
+        if missing_cols:
+            raise ValueError(f"Missing columns in dataset: {missing_cols}")
+        
+        # 欠損値の処理
+        df_clean = df_filtered[design_variables + [objective_variable]].dropna()
+        print(f"[DataLoader] After dropping NaN: {df_clean.shape}")
+        
+        # データ型変換
+        X_df = df_clean[design_variables].astype(float).reset_index(drop=True)
+        y_raw = df_clean[objective_variable].astype(float).reset_index(drop=True)
+        
+        print(f"[DataLoader] ✓ Using Complex Alloy data with {len(df_clean)} samples")
+        print(f"[DataLoader] ✓ Composition columns: {[col for col in design_variables if col in ['Fe', 'Ni', 'Cr', 'Co', 'Al', 'Ti', 'Mn', 'Cu', 'Zr']]}")
+        print(f"[DataLoader] ✓ Test condition columns: {[col for col in design_variables if col in ['stress_max', 'stress_ratio', 'frequency']]}")
         
     else:
         # 実データファイルが見つからない場合、モックデータを生成
