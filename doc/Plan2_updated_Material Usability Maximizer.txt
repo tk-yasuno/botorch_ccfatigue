@@ -1,0 +1,67 @@
+Plan: Material Usability Maximizer MVP（計算環境対応版）
+TL;DR: CCFatigueデータセットとBoTorch + GPによるベイズ最適化で材料の長寿命条件を適応的に探索。3つの計算モード（並列処理なし／CPU 16コア／GPU 16GB）を設定ファイルで選択可能にし、計算パフォーマンスを可視化します。
+
+実装ステップ（更新版）
+Phase 1: プロジェクトセットアップ
+
+環境構築ファイル作成 — requirements.txt, README.md, .gitignore, config.yaml（計算環境設定）
+Phase 2: 計算環境管理実装（新規）
+2. ディレクトリ構造作成 — src/（compute_config.py追加）, results/, doc
+3. src/compute_config.py実装 — ComputeConfigクラス、config.yaml読み込み、デバイス自動検出、3モード対応（no_parallel / cpu_16cores / gpu_16gb）、torch.set_num_threads()制御、GPUメモリ管理
+
+Phase 3: データハンドリング実装 (parallel with step 3)
+4. src/data_loader.py実装 — CCFatigueデータ読み込み、設計変数定義、初期データ分割、ComputeConfigからdevice情報を受け取りテンソル配置
+
+Phase 4: ベイズ最適化エンジン実装 (depends on step 3)
+5. src/bayesian_optimizer.py実装 — BayesianOptimizerクラス、ComputeConfigを受け取りdevice管理、fit_model（モデルをdeviceに配置）、propose_next_point（GPUメモリに応じたパラメータ調整）、optimize_loop（実行時間とメモリ記録）
+
+Phase 5: 可視化機能実装 (parallel with step 7)
+6. src/visualization.py実装 — 収束曲線、探索空間、GP予測、獲得関数、plot_compute_performance()（新規：実行時間とGPUメモリ使用量）、結果サマリー
+
+Phase 6: メイン実行スクリプト (parallel with step 6)
+7. main_demo.py実装 — コマンドライン引数追加（--config, --compute-mode）、config.yamlとCLI引数のマージ、計算環境情報ログ
+
+Phase 7: Jupyterデモ作成 (depends on steps 3-7)
+8. demo_notebook.ipynb作成 — セクション2追加（計算環境選択と確認）、セクション6追加（計算パフォーマンス分析）
+
+Phase 8: ドキュメント整備 (depends on steps 1-8)
+9. ドキュメント作成 — Implementation_Notes.md（計算環境設定の説明追加）、README.md（計算モード選択ガイド）、config.yamlコメント充実化
+
+Phase 9: 検証と最終調整 (depends on all previous steps)
+10. 統合テストと検証 — 各計算モードでの実行テスト（no_parallel / cpu_16cores / gpu_16gb）、パフォーマンス比較、GPU非搭載環境での自動フォールバック確認
+
+関連ファイル（主要な追加）
+config.yaml — 3つの計算モード設定（no_parallel: num_threads=1 / cpu_16cores: num_threads=16 / gpu_16gb: device='cuda', batch_size=auto）、最適化パラメータ（M, T, seed, acq_function）
+src/compute_config.py — ComputeConfigクラス（config読み込み、デバイス自動検出、torch.set_num_threads()適用、GPUメモリ監視）
+src/data_loader.py — device情報を受け取りテンソル配置
+src/bayesian_optimizer.py — ComputeConfigを受け取る、GPUメモリに応じたoptimize_acqfパラメータ調整、メモリモニタリング
+src/visualization.py — plot_compute_performance()追加（実行時間、GPUメモリ推移）
+main_demo.py — --config, --compute-mode引数追加、設定マージ、計算環境ログ
+demo_notebook.ipynb — 計算モード選択セクション、パフォーマンス分析セクション追加
+検証方法（更新）
+各モードでの動作確認:
+python main_demo.py --compute-mode no_parallel
+python main_demo.py --compute-mode cpu_16cores
+python main_demo.py --compute-mode gpu_16gb（GPU環境）
+最適化性能: 全モードで同等の最適化性能
+計算パフォーマンス: cpu_16cores > no_parallel、gpu_16gb > cpu_16cores（GPU環境）
+デバイス管理: GPU非搭載環境での自動フォールバック、GPUメモリ16GB以内
+可視化確認: 計算パフォーマンスプロット生成
+設計の決定事項（主要な追加）
+計算環境管理:
+
+設定方法: config.yaml（デフォルト） + コマンドライン引数（優先）
+3つのモード:
+no_parallel: CPU単一スレッド（再現性最優先、デバッグ用）
+cpu_16cores: CPU 16コア並列（torch.set_num_threads(16)）
+gpu_16gb: CUDA GPU、バッチサイズ自動調整（16GBメモリ制約）
+デフォルト: auto（GPU自動検出、利用可能ならGPU、なければCPU）
+GPU制約対応: optimize_acqfのnum_restarts, raw_samplesを動的調整
+メモリ監視: psutilでGPUメモリ使用量監視、警告表示
+スコープ（更新）:
+
+含まれる: 3つの計算モード、GPUメモリ管理、CPU並列処理制御、計算パフォーマンス可視化
+含まれない: 分散計算（複数GPU/ノード）、カスタム並列化（multiprocessing）、バッチ実験（q>1）
+この更新した計画で実装を進めてよろしいでしょうか？変更や追加のご要望があれば教えてください。
+
+Claude Sonnet 4.5 • 1x

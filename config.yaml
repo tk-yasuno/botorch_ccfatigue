@@ -1,0 +1,74 @@
+# Material Usability Maximizer MVP - Configuration File
+# 計算環境設定と最適化パラメータ
+
+# =============================================================================
+# 計算モード (Compute Mode)
+# =============================================================================
+# 選択肢:
+#   - auto: GPU利用可能なら自動的にGPUを使用、なければCPU (推奨)
+#   - no_parallel: CPU単一スレッド実行 (再現性最優先、デバッグ用)
+#   - cpu_16cores: CPU 16コアでの並列処理
+#   - gpu_16gb: GPU (CUDA) での実行、16GBメモリ制約対応
+compute_mode: auto
+
+# =============================================================================
+# モード別設定 (Mode-specific Settings)
+# =============================================================================
+
+# 並列処理なしモード (デバッグ・再現性確保用)
+no_parallel:
+  device: cpu
+  num_threads: 1
+  batch_size: 1
+
+# CPU 16コア並列処理モード
+cpu_16cores:
+  device: cpu
+  num_threads: 16
+  batch_size: 1
+
+# GPU 16GB制約モード
+gpu_16gb:
+  device: cuda
+  max_memory_gb: 16
+  batch_size: auto  # メモリに応じて自動調整
+  num_restarts: 10  # optimize_acqfのリスタート回数
+  raw_samples: 128  # 獲得関数最適化の初期サンプル数
+
+# =============================================================================
+# 最適化パラメータ (Optimization Parameters)
+# =============================================================================
+optimization:
+  M: 10                      # 初期データ点数 (Initial sample size)
+  T: 20                      # ベイズ最適化の反復回数 (Number of BO iterations)
+  seed: 42                   # 乱数シード (Random seed for reproducibility)
+  acq_function: EI           # 獲得関数 (Acquisition function: EI or LogEI)
+  
+  # データセット設定
+  dataset_name: snc          # CCFatigueデータセット名 (snc: S-N curve data)
+  
+  # 設計変数 (Design variables)
+  design_variables:
+    - stress_max
+    - stress_ratio
+  
+  # 目的変数 (Objective variable)
+  objective_variable: cycles_to_failure
+  objective_transform: log10  # 対数変換 (log10, log, or none)
+
+# =============================================================================
+# 可視化設定 (Visualization Settings)
+# =============================================================================
+visualization:
+  figure_format: png         # 保存形式 (png, pdf, svg)
+  dpi: 300                   # 解像度
+  style: seaborn-v0_8        # matplotlibスタイル
+  
+# =============================================================================
+# 出力設定 (Output Settings)
+# =============================================================================
+output:
+  results_dir: results       # 結果保存ディレクトリ
+  save_model: false          # GPモデルの保存 (大容量のため通常false)
+  save_history: true         # 最適化履歴の保存
+  verbose: true              # 詳細ログの表示
